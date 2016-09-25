@@ -3,29 +3,20 @@ package hypersonic;
 import java.util.Scanner;
 
 public class Point {
-
-  private int x;
-  private int y;
+  int x;
+  int y;
 
   Point(int x, int y) {
-    setPoint(x, y);
+    this.x = x;
+    this.y = y;
   }
 
   Point(Scanner scanner) {
     this(scanner.nextInt(), scanner.nextInt());
   }
 
-  public void setPoint(int x, int y) {
-    this.x = x;
-    this.y = y;
-  }
-
-  public int x() {
-    return x;
-  }
-
-  public int y() {
-    return y;
+  public int distanceTo(Point other) {
+    return Math.abs(other.x - x) + Math.abs(other.y - y);
   }
 
   @Override
@@ -45,5 +36,10 @@ public class Point {
     int result = x;
     result = 31 * result + y;
     return result;
+  }
+
+  @Override
+  public String toString() {
+    return "Point("+x+"|"+y+")";
   }
 }

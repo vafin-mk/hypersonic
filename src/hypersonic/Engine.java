@@ -4,26 +4,29 @@ import java.util.Scanner;
 
 public class Engine {
 
-  private GameParameters params = new GameParameters();
-  private Map map;
-  private EntityHandler entityHandler;
-  private DecisionMaker decisionMaker;
-
   public void start() {
-    Scanner scanner = new Scanner(System.in);
-    params.fromScanner(scanner);
-    map = new Map(params);
-    entityHandler = new EntityHandler(params.teamId());
-    decisionMaker = new DecisionMaker(params, map, entityHandler);
-    scanner.nextLine();
+    Scanner in = new Scanner(System.in);
+    Constants.WIDTH = in.nextInt();
+    Constants.HEIGHT = in.nextInt();
+    Constants.TEAM_ID = in.nextInt();
+    in.nextLine();
+
+    TileMap tileMap = new TileMap();
 
     // game loop
     while (true) {
-      map.updateMap(scanner);
-      entityHandler.updateEntities(scanner);
-      map.applyEntityHeats(entityHandler);
-      scanner.nextLine();
-      decisionMaker.decision();
+      tileMap.updateMap(in);
+      in.nextLine();
+
+      if (tileMap.canBombNow()) {
+        command(true, tileMap.findBestPositionWithBomb());
+      } else {
+        command(false, tileMap.findBestPosition());
+      }
     }
+  }
+
+  private void command(boolean bomb, Point position) {
+    System.out.println(String.format("%s %s %s", bomb ? "BOMB" : "MOVE", position.x, position.y));
   }
 }
