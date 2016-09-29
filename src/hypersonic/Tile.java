@@ -1,37 +1,36 @@
 package hypersonic;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.StringJoiner;
+
 public class Tile {
-  Point pos;
 
-  boolean moveable = true;
-  boolean stopExplosion = false;
-  boolean destructible = true;
-  boolean dangerous = false;
-  int boxType = -1;
-
-  int magnetism;
-  Tile(Point pos) {
-    this.pos = pos;
+  enum Type {
+    FLOOR, BOX, BOX_RANGE, BOX_AMOUNT, WALL, BOMB, ITEM_RANGE, ITEM_AMOUNT
   }
 
+  static EnumSet<Type> PASSABLE = EnumSet.of(Type.FLOOR, Type.ITEM_RANGE, Type.ITEM_AMOUNT);
+  static EnumSet<Type> NON_PASSABLE = EnumSet.of(Type.BOX, Type.BOX_RANGE, Type.BOX_AMOUNT, Type.WALL, Type.BOMB);
+  static EnumSet<Type> EXPLODE = EnumSet.of(Type.BOX, Type.BOX_RANGE, Type.BOX_AMOUNT, Type.WALL, Type.BOMB, Type.ITEM_AMOUNT, Type.ITEM_RANGE);
+  static EnumSet<Type> BOXES = EnumSet.of(Type.BOX, Type.BOX_RANGE, Type.BOX_AMOUNT);
 
-  @Override
-  public boolean equals(Object o) {
-    if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
+  Coord coord;
+  Type type = Type.FLOOR;
+  int weight;
+  List<Tile> adjTiles = new ArrayList<>();
 
-    Tile tile = (Tile) o;
-
-    return pos.equals(tile.pos);
+  Tile(Coord coord) {
+    this.coord = coord;
   }
 
-  @Override
-  public int hashCode() {
-    return pos.hashCode();
+  void setType(Type type) {
+    this.type = type;
   }
 
   @Override
   public String toString() {
-    return "Tile:" + pos.toString() + "; magnet=" + magnetism;
+    return String.format("Coord:(%s); type=%s; weight=%s", coord, type, weight);
   }
 }

@@ -1,63 +1,207 @@
+import java.util.ArrayList;
 import java.util.Scanner;
+import java.util.Arrays;
+import java.util.StringJoiner;
 import java.util.*;
-import java.util.Comparator;
+import java.util.List;
+import java.util.EnumSet;
 
 class Player { public static void main(String[] args) { new Engine().start();}}
-class Constants {
-  static int WIDTH;
-  static int HEIGHT;
-  static int TEAM_ID;
+class AI {
 
-  static final int ENTITY_BOMBER = 0;
-  static final int ENTITY_BOMB = 1;
-  static final int ENTITY_ITEM = 2;
+  enum Strategy {
+    BOX_HUNTER, //normal
+    AGGRO_PALADIN, //aggro paladin
+    RUNNER //escaper
+  }
 
-  static final int ITEM_EMPTY = 0;
-  static final int ITEM_POWER = 1;
-  static final int ITEM_AMOUNT = 2;
-}
+  World world;
 
-class Engine {
+  int scanRange = 6;
+  Strategy strategy = Strategy.BOX_HUNTER;
 
-  public void start() {
-    Scanner in = new Scanner(System.in);
-    Constants.WIDTH = in.nextInt();
-    Constants.HEIGHT = in.nextInt();
-    Constants.TEAM_ID = in.nextInt();
-    in.nextLine();
+  AI(World world) {
+    this.world = world;
+  }
 
-    TileMap tileMap = new TileMap();
-
-    // game loop
-    while (true) {
-      tileMap.updateMap(in);
-      in.nextLine();
-
-      if (tileMap.canBombNow()) {
-        command(true, tileMap.findBestPositionWithBomb());
+  void makeDecision() {
+    List<Tile> available = new ArrayList<>();
+    world.buildAvailableTiles(scanRange, available);
+    world.calculateWeigths(available, strategy);
+    if (available.isEmpty()) {
+      System.err.println("STAY WE YOU ARE!");
+      stay();
+      return;
+    }
+    available.sort((o1, o2) -> {
+      int weightDelta = o2.weight - o1.weight;
+      if (weightDelta != 0) {
+        return weightDelta;
+      }
+      int distDelta = o1.coord.distance(world.hero.coord) - o2.coord.distance(world.hero.coord);
+      if (distDelta != 0) {
+        return distDelta;
+      }
+      if (o1.coord.x != o2.coord.x) {
+        return o1.coord.x - o2.coord.x;
       } else {
-        command(false, tileMap.findBestPosition());
+        return o1.coord.y - o2.coord.y;
+      }
+    });
+    System.err.println("AVAILABLE:" + Arrays.toString(available.toArray()));
+    switch (strategy) {
+      case BOX_HUNTER:
+        if (boxDecision(available)) {
+          return;
+        }
+        break;
+      case AGGRO_PALADIN:
+        if (aggroDecision(available)) {
+          return;
+        }
+        break;
+      case RUNNER:
+        if (runnerDecision(available)) {
+          return;
+        }
+        break;
+    }
+    System.err.println("HOUSTON WE HAVE A PROBLEM; STAY WHERE YOU ARE");
+    stay();
+  }
+
+  boolean boxDecision(List<Tile> available) {
+    for (Tile tile : available) {
+      if (world.explosionMap.map[tile.coord.x][tile.coord.y] != ExplosionMap.NO_EXPLODE) {
+        continue;
+      }
+      if (tile.type == Tile.Type.ITEM_RANGE || tile.type == Tile.Type.ITEM_AMOUNT) {
+        System.err.println("GOING AFTER ITEM");
+        move(tile.coord);
+        return true;
+      }
+      if (world.canPlaceBomb(tile.coord, available)) {
+        if (world.hero.bombs > 0) {
+          if (tile.coord.equals(world.hero.coord)) {
+            System.err.println("BOMBING NOW");
+            bomb(tile.coord);//todo move to another poi immediately
+            return true;
+          } else {
+            System.err.println("GOING TO PLACE BOMB AT " + tile.coord);
+            move(tile.coord);
+            return true;
+          }
+        }
       }
     }
+    System.err.println("LOOKING FOR SAFE PLACE");
+    for (Tile tile : available) {
+      if (world.explosionMap.map[tile.coord.x][tile.coord.y] == ExplosionMap.NO_EXPLODE) {
+        System.err.println("GOING TO SAFE PLACE:" + tile.coord);
+        move(tile.coord);
+        return true;
+      }
+    }
+    return false;
   }
 
-  private void command(boolean bomb, Point position) {
-    System.out.println(String.format("%s %s %s", bomb ? "BOMB" : "MOVE", position.x, position.y));
+  boolean aggroDecision(List<Tile> available) {
+    for (Tile tile : available) {
+      if (world.explosionMap.map[tile.coord.x][tile.coord.y] != ExplosionMap.NO_EXPLODE || !haveEnemyInRange(tile.coord, 6)) {
+        continue;
+      }
+      if (world.canPlaceBomb(tile.coord, available)) {
+        if (world.hero.bombs > 0) {
+          if (tile.coord.equals(world.hero.coord) || world.hero.bombs > 1 && !haveBombInRange(tile.coord, 2)) {
+            System.err.println("BOMBING NOW");
+            bomb(tile.coord);//todo move to another poi immediately
+            return true;
+          } else {
+            System.err.println("GOING TO PLACE BOMB AT " + tile.coord);
+            move(tile.coord);
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  boolean runnerDecision(List<Tile> available) {
+    Tile safest = null;
+    int maxDist = 0;
+    for (Tile tile : available) {
+      if (world.explosionMap.map[tile.coord.x][tile.coord.y] == ExplosionMap.NO_EXPLODE) {
+        int distToHero = tile.coord.distance(world.hero.coord);
+        if (distToHero > maxDist) {
+          maxDist = distToHero;
+          safest = tile;
+        }
+      }
+    }
+
+    if (safest != null) {
+//      if (world.canPlaceBomb(world.hero.coord, available) && world.hero.bombs > 0 && haveEnemyInRange(world.hero.coord, 6)) {
+//        bomb(safest.coord);
+//        return true;
+//      } else {
+        System.err.println("GOING TO SAFE PLACE:" + safest.coord);
+        move(safest.coord);
+//        return true;
+//      }
+    }
+    return false;
+  }
+
+  boolean haveEnemyInRange(Coord lookCoord, int radius) {
+    boolean haveEnemyInRange = false;
+    for (Bomber rival : world.rivals.values()) {
+      if (rival.updateRound == world.round && rival.coord.distance(lookCoord) < radius) {
+        haveEnemyInRange = true;
+        break;
+      }
+    }
+    return haveEnemyInRange;
+  }
+
+  boolean haveBombInRange(Coord lookCoord, int radius) {
+    boolean haveBombInRange = false;
+    for (Bomb bomb : world.bombs) {
+      if (bomb.coord.distance(lookCoord) < radius) {
+        haveBombInRange = true;
+        break;
+      }
+    }
+    return haveBombInRange;
+  }
+
+  private void stay() {
+    move(world.hero.coord);
+  }
+
+  private void move(Coord coord) {
+    System.out.println("MOVE " + coord.x + " " + coord.y);
+  }
+
+  private void bomb(Coord coord) {
+    System.out.println("BOMB " + coord.x + " " + coord.y);
   }
 }
 
-class Entity {
+class Bomb {
 
-  int type;
-  Point position;
-  int param1;
-  int param2;
+  static final int ENTITY_TYPE = 1;
 
-  Entity(int type, Point position, int param1, int param2) {
-    this.type = type;
-    this.position = position;
-    this.param1 = param1;
-    this.param2 = param2;
+  Coord coord = new Coord(0, 0);
+  int countdown;
+  int range;
+  int owner;
+
+  Bomb(Coord coord, int owner, int countdown, int range) {
+    this.coord = coord;
+    this.owner = owner;
+    this.countdown = countdown;
+    this.range = range;
   }
 
   @Override
@@ -65,36 +209,33 @@ class Entity {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
 
-    Entity entity = (Entity) o;
+    Bomb bomb = (Bomb) o;
 
-    if (type != entity.type) return false;
-    return position.equals(entity.position);
+    return coord != null ? coord.equals(bomb.coord) : bomb.coord == null;
 
   }
 
   @Override
   public int hashCode() {
-    int result = type;
-    result = 31 * result + position.hashCode();
-    return result;
+    return coord != null ? coord.hashCode() : 0;
   }
 }
 
-class Point {
-  int x;
-  int y;
+class Bomber {
 
-  Point(int x, int y) {
-    this.x = x;
-    this.y = y;
-  }
+  static final int ENTITY_TYPE = 0;
 
-  Point(Scanner scanner) {
-    this(scanner.nextInt(), scanner.nextInt());
-  }
+  Coord coord = new Coord(0, 0);
+  int bombs;
+  int range;
+  int points;
+  int updateRound;//bomber dead if this < world.round
 
-  public int distanceTo(Point other) {
-    return Math.abs(other.x - x) + Math.abs(other.y - y);
+  void update(Coord coord, int bombs, int range, int updateRound) {
+    this.coord.update(coord);
+    this.bombs = bombs;
+    this.range = range;
+    this.updateRound = updateRound;
   }
 
   @Override
@@ -102,10 +243,56 @@ class Point {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
 
-    Point point = (Point) o;
+    Bomber bomber = (Bomber) o;
 
-    if (x != point.x) return false;
-    return y == point.y;
+    if (bombs != bomber.bombs) return false;
+    if (range != bomber.range) return false;
+    if (points != bomber.points) return false;
+    return coord != null ? coord.equals(bomber.coord) : bomber.coord == null;
+
+  }
+
+  @Override
+  public int hashCode() {
+    int result = coord != null ? coord.hashCode() : 0;
+    result = 31 * result + bombs;
+    result = 31 * result + range;
+    result = 31 * result + points;
+    return result;
+  }
+}
+
+class Coord {
+  int x;
+  int y;
+
+  Coord(int x, int y) {
+    update(x, y);
+  }
+
+  void update(int x, int y) {
+    this.x = x;
+    this.y = y;
+  }
+
+  void update(Coord other) {
+    this.x = other.x;
+    this.y = other.y;
+  }
+
+  int distance(Coord other) {
+    return Math.abs(x - other.x) + Math.abs(y - other.y);
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+
+    Coord that = (Coord) o;
+
+    if (x != that.x) return false;
+    return y == that.y;
 
   }
 
@@ -118,361 +305,429 @@ class Point {
 
   @Override
   public String toString() {
-    return "Point("+x+"|"+y+")";
+    return x +"|" + y;
   }
 }
 
-class PossibleMoveComparator implements Comparator<Tile> {
+class Engine {
 
-  Point heroPosition;
+  public void start() {
+    Scanner scanner = new Scanner(System.in);
+    World world = new World();
+    world.getWorldParameters(scanner);
+    AI ai = new AI(world);
+    long ns = System.nanoTime();
 
-  @Override
-  public int compare(Tile tile1, Tile tile2) {
-    if (tile2.dangerous) {
-      return -1;
-    }
-    if (tile1.dangerous) {
-      return 1;
-    }
-    int distToFirst = tile1.pos.distanceTo(heroPosition);
-    int distToSecond = tile2.pos.distanceTo(heroPosition);
+    while (true) {
+      System.err.println("Round " + world.round + " calc in " + (System.nanoTime() - ns) / 1000000 + " ms");
+      ns = System.nanoTime();
 
-    int firstPts = 2 * tile1.magnetism - 3 * distToFirst;
-    int secondPts = 2 * tile2.magnetism - 3 * distToSecond;
-    if (firstPts > secondPts) {
-      return -1;
-    } else if (secondPts > firstPts) {
-      return 1;
+      world.updateTiles(scanner);
+      world.updateEntities(scanner);
+      world.updateExplosionMap();
+      world.updateTileLinks();
+
+      if (world.round >= 120 || world.remainingBoxes < 5) {
+        System.err.println("CHANGE STRATEGY");
+
+        if (world.getLeader().equals(world.hero)) {
+          ai.scanRange = 8;
+          ai.strategy = AI.Strategy.RUNNER;
+        } else {
+          ai.scanRange = 16;
+          ai.strategy = AI.Strategy.AGGRO_PALADIN;
+        }
+      }
+      ai.makeDecision();
+      world.round++;
     }
-    return 0;
+  }
+}
+
+class ExplosionMap {
+
+  static int NO_EXPLODE = Integer.MAX_VALUE;
+  static int EXPLODE_NEXT_TURN = 1;
+
+  enum Direction {
+    LEFT, UP, RIGHT, DOWN
+  }
+
+  World world;
+  //0 - no explosion, >0 rounds to explode
+  int[][] map;
+
+  ExplosionMap(World world) {
+    this.world = world;
+    this.map = new int[world.width][world.height];
+  }
+
+  void update(List<Bomb> bombs) {
+    for (int x = 0; x < world.width; x++) {
+      for (int y = 0; y < world.height; y++) {
+        map[x][y] = NO_EXPLODE;
+      }
+    }
+
+    for (Bomb bomb : bombs) {
+      List<Coord> exploders = explodingMap(bomb.coord, bomb.range);
+      for (Bomb chained : bombs) {
+        if (exploders.contains(chained.coord)) {
+          chained.countdown = Math.min(bomb.countdown, chained.countdown);
+        }
+      }
+      for (Coord explode : exploders) {
+        map[explode.x][explode.y] = Math.min(bomb.countdown, map[explode.x][explode.y]);
+      }
+    }
+  }
+
+  List<Coord> explodingMap(Coord coord, int bombPower) {
+    List<Coord> exploders = new ArrayList<>();
+    exploders.addAll(explodingWave(coord, Direction.LEFT, bombPower));
+    exploders.addAll(explodingWave(coord, Direction.UP, bombPower));
+    exploders.addAll(explodingWave(coord, Direction.RIGHT, bombPower));
+    exploders.addAll(explodingWave(coord, Direction.DOWN, bombPower));
+    return exploders;
+  }
+
+  List<Coord> explodingWave(Coord coord, Direction direction, int bombPower) {
+    List<Coord> explodingCoords = new ArrayList<>();
+    explodingCoords.add(coord);
+    switch (direction) {
+      case LEFT:
+        for (int x = coord.x - 1; x >= Math.max(0, coord.x - bombPower); x--) {
+          Tile tile = world.map[x][coord.y];
+          if (Tile.EXPLODE.contains(tile.type)) {
+            explodingCoords.add(new Coord(x, coord.y));
+            break;
+          }
+          explodingCoords.add(new Coord(x, coord.y));
+        }
+        break;
+      case UP:
+        for (int y = coord.y - 1; y >= Math.max(0, coord.y - bombPower); y--) {
+          Tile tile = world.map[coord.x][y];
+          if (Tile.EXPLODE.contains(tile.type)) {
+            explodingCoords.add(new Coord(coord.x, y));
+            break;
+          }
+          explodingCoords.add(new Coord(coord.x, y));
+        }
+        break;
+      case RIGHT:
+        for (int x = coord.x + 1; x < Math.min(world.width, coord.x + bombPower); x++) {
+          Tile tile = world.map[x][coord.y];
+          if (Tile.EXPLODE.contains(tile.type)) {
+            explodingCoords.add(new Coord(x, coord.y));
+            break;
+          }
+          explodingCoords.add(new Coord(x, coord.y));
+        }
+        break;
+      case DOWN:
+        for (int y = coord.y + 1; y < Math.min(world.height, coord.y + bombPower); y++) {
+          Tile tile = world.map[coord.x][y];
+          if (Tile.EXPLODE.contains(tile.type)) {
+            explodingCoords.add(new Coord(coord.x, y));
+            break;
+          }
+          explodingCoords.add(new Coord(coord.x, y));
+        }
+        break;
+    }
+    return explodingCoords;
   }
 }
 
 class Tile {
-  Point pos;
 
-  boolean moveable = true;
-  boolean stopExplosion = false;
-  boolean destructible = true;
-  boolean dangerous = false;
-  int boxType = -1;
-
-  int magnetism;
-  Tile(Point pos) {
-    this.pos = pos;
+  enum Type {
+    FLOOR, BOX, BOX_RANGE, BOX_AMOUNT, WALL, BOMB, ITEM_RANGE, ITEM_AMOUNT
   }
 
+  static EnumSet<Type> PASSABLE = EnumSet.of(Type.FLOOR, Type.ITEM_RANGE, Type.ITEM_AMOUNT);
+  static EnumSet<Type> NON_PASSABLE = EnumSet.of(Type.BOX, Type.BOX_RANGE, Type.BOX_AMOUNT, Type.WALL, Type.BOMB);
+  static EnumSet<Type> EXPLODE = EnumSet.of(Type.BOX, Type.BOX_RANGE, Type.BOX_AMOUNT, Type.WALL, Type.BOMB, Type.ITEM_AMOUNT, Type.ITEM_RANGE);
+  static EnumSet<Type> BOXES = EnumSet.of(Type.BOX, Type.BOX_RANGE, Type.BOX_AMOUNT);
 
-  @Override
-  public boolean equals(Object o) {
-    if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
+  Coord coord;
+  Type type = Type.FLOOR;
+  int weight;
+  List<Tile> adjTiles = new ArrayList<>();
 
-    Tile tile = (Tile) o;
-
-    return pos.equals(tile.pos);
+  Tile(Coord coord) {
+    this.coord = coord;
   }
 
-  @Override
-  public int hashCode() {
-    return pos.hashCode();
+  void setType(Type type) {
+    this.type = type;
   }
 
   @Override
   public String toString() {
-    return "Tile:" + pos.toString() + "; magnet=" + magnetism;
+    return String.format("Coord:(%s); type=%s; weight=%s", coord, type, weight);
   }
 }
 
-class TileMap {
-  
-  private Tile[][] tiles = new Tile[Constants.WIDTH][Constants.HEIGHT];
+class World {
 
-  private Entity hero;
-  private Entity rival;
-  private Set<Entity> bombs = new HashSet<>();
-  private Set<Entity> items = new HashSet<>();
-  private List<Tile> possibleMoves = new ArrayList<>();
-  private PossibleMoveComparator moveComparator = new PossibleMoveComparator();
+  int width;
+  int height;
+  int teamId;
+  Tile[][] map;
+  ExplosionMap explosionMap;
 
-  private int boxCount;
-  private int remainingBox;
-  private boolean firstRun;
+  Bomber hero = new Bomber();
+  Map<Integer, Bomber> rivals = new HashMap<>();
+  List<Bomb> bombs = new ArrayList<>();
 
-  TileMap() {
-    for (int x = 0; x < Constants.WIDTH; x++) {
-      for (int y = 0; y < Constants.HEIGHT; y++) {
-        tiles[x][y] = new Tile(new Point(x, y));
-      }
-    }
+  int boxesCount = 100000;
+  int remainingBoxes = 0;
+  int round = 0;
+
+  void getWorldParameters(Scanner scanner) {
+    width = scanner.nextInt();
+    height = scanner.nextInt();
+    teamId = scanner.nextInt();
+    map = new Tile[width][height];
+    explosionMap = new ExplosionMap(this);
   }
-  
-  public void updateMap(Scanner scanner) {
-    for (int x = 0; x < Constants.WIDTH; x++) {
-      for (int y = 0; y < Constants.HEIGHT; y++) {
-        tiles[x][y] = new Tile(new Point(x, y));
+
+  void updateTiles(Scanner scanner) {
+    for (int x = 0; x < width; x++) {
+      for (int y = 0; y < height; y++) {
+        map[x][y] = new Tile(new Coord(x, y));
       }
     }
 
-    for (int y = 0; y < Constants.HEIGHT; y++) {
-      char[] row = scanner.nextLine().toCharArray();
+    int counter = 0;
+    for (int y = 0; y < height; y++) {
+      char[] row = scanner.next().toCharArray();
       for (int x = 0; x < row.length; x++) {
         char cell = row[x];
         switch (cell) {
           case '.':
-            tiles[x][y].moveable = true;
-            tiles[x][y].stopExplosion = false;
+            map[x][y].setType(Tile.Type.FLOOR);
             break;
           case '0':
+            map[x][y].setType(Tile.Type.BOX);
+            counter++;
+            break;
           case '1':
+            map[x][y].setType(Tile.Type.BOX_RANGE);
+            counter++;
+            break;
           case '2':
-            tiles[x][y].moveable = false;
-            tiles[x][y].stopExplosion = true;
-            if (cell == '0') {
-              tiles[x][y].boxType = Constants.ITEM_EMPTY;
-            } else if (cell == '1') {
-              tiles[x][y].boxType = Constants.ITEM_POWER;
-            } else if (cell == '2') {
-              tiles[x][y].boxType = Constants.ITEM_AMOUNT;
-            }
-            remainingBox++;
-            if (firstRun) {
-              boxCount++;
-            }
+            map[x][y].setType(Tile.Type.BOX_AMOUNT);
+            counter++;
             break;
           case 'X':
-            tiles[x][y].moveable = false;
-            tiles[x][y].stopExplosion = true;
-            tiles[x][y].destructible = false;
+            map[x][y].setType(Tile.Type.WALL);
             break;
           default:
-            throw new IllegalStateException();
+            System.err.println("UNKNOWN CELL TYPE:" + cell);
         }
       }
     }
-    
-    updateEntities(scanner);
-    updatePossibleMoves();
-    updateMoveMagnetisms();
-    moveComparator.heroPosition = hero.position;
-    possibleMoves.sort(moveComparator);
-
-    firstRun = false;
+    if (boxesCount == 100000) {
+      boxesCount = counter;
+    }
+    remainingBoxes = counter;
   }
-  
-  private void updateEntities(Scanner scanner) {
-    bombs.clear();
-    items.clear();
 
+  void updateEntities(Scanner scanner) {
+    bombs.clear();
     int entities = scanner.nextInt();
     for (int i = 0; i < entities; i++) {
       int entityType = scanner.nextInt();
       int owner = scanner.nextInt();
-      Point position = new Point(scanner);
+      int x = scanner.nextInt();
+      int y = scanner.nextInt();
       int param1 = scanner.nextInt();
       int param2 = scanner.nextInt();
-      Entity entity = new Entity(entityType, position, param1, param2);
+
       switch (entityType) {
-        case Constants.ENTITY_BOMBER:
-          if (owner == Constants.TEAM_ID) {
-            hero = entity;
+        case Bomber.ENTITY_TYPE:
+          Coord coord = new Coord(x, y);
+          if (owner == teamId) {
+            hero.update(coord, param1, param2, round);
           } else {
-            rival = entity;
+            rivals.putIfAbsent(owner, new Bomber());
+            rivals.get(owner).update(coord, param1, param2, round);
           }
           break;
-        case Constants.ENTITY_BOMB:
-          addBomb(entity);
+        case Bomb.ENTITY_TYPE:
+          bombs.add(new Bomb(new Coord(x, y), owner, param1, param2));
+          map[x][y].setType(Tile.Type.BOMB);
           break;
-        case Constants.ENTITY_ITEM:
-          addItem(entity);
+        case 2://item
+          map[x][y].setType(param1 == 1 ? Tile.Type.ITEM_RANGE : Tile.Type.ITEM_AMOUNT);
           break;
         default:
-          throw new IllegalStateException();
+          System.err.println("UNKNOWN ENTITY TYPE:" + entityType);
       }
     }
   }
 
-  private void updatePossibleMoves() {
-    possibleMoves.clear();
-    checkTileAndAdd(hero.position.x, hero.position.y);
-    //clear duplicates
-//    Set<Tile> set = new HashSet<>(possibleMoves);
-//    possibleMoves.clear();
-//    possibleMoves.addAll(set);
-//    System.err.println("POSSIBLE " + Arrays.toString(possibleMoves.toArray()));
+  void updateExplosionMap() {
+    explosionMap.update(bombs);
+
+    for (Bomb bomb : bombs) {
+      if (explosionMap.map[bomb.coord.x][bomb.coord.y] != ExplosionMap.EXPLODE_NEXT_TURN) {
+        continue;
+      }
+
+      explosionMap.explodingMap(bomb.coord, bomb.range).stream().filter(coord -> Tile.BOXES.contains(map[coord.x][coord.y].type)).forEach(coord -> {
+        if (bomb.owner == teamId) hero.points++;
+        else rivals.get(bomb.owner).points++;
+      });
+    }
   }
 
-  private void updateMoveMagnetisms() {
-
-    for (Tile move : possibleMoves) {
-      int magnetism = 0;
-      if (move.dangerous) {
-        magnetism -= 1000;
+  void updateTileLinks() {
+    for (int x = 0; x < width; x++) {
+      for (int y = 0; y < height; y++) {
+        Tile tile = map[x][y];
+        tile.adjTiles.clear();
+        addAdjacent(tile, x - 1, y);
+        addAdjacent(tile, x + 1, y);
+        addAdjacent(tile, x, y - 1);
+        addAdjacent(tile, x, y + 1);
       }
-      for (Entity item : items) {
-        if (item.position.equals(move.pos)) {
-          if (item.param1 == Constants.ITEM_POWER) {
-            magnetism += 5;
-          } else if (item.param1 == Constants.ITEM_AMOUNT) {
-            magnetism += 3;
+    }
+  }
+
+  void addAdjacent(Tile tile, int adjX, int adjY) {
+    if (adjX < 0 || adjY < 0 || adjX >= width || adjY >= height) {
+      return;
+    }
+    Tile adjTile = map[adjX][adjY];
+    if (Tile.NON_PASSABLE.contains(adjTile.type)) {
+      return;
+    }
+    if (tile.adjTiles.contains(adjTile)) {
+      System.err.println("Already have " + adjTile);
+    }
+    tile.adjTiles.add(adjTile);
+  }
+
+  void buildAvailableTiles(int scanRadius, List<Tile> tiles) {
+    int turn = 1;
+    Tile currTile = map[hero.coord.x][hero.coord.y];
+    tiles.add(currTile);
+    for (Tile tile : currTile.adjTiles) {
+      addIfAvailable(turn+1, scanRadius, tiles, tile);
+    }
+  }
+
+  void addIfAvailable(int turn, int maxTurn, List<Tile> tiles, Tile tile) {
+//    System.err.println(turn + "||" + tile.coord + "||" + explosionMap.map[tile.coord.x][tile.coord.y]);
+    if (turn >= maxTurn) {
+      return;
+    }
+    if (tiles.contains(tile)) {
+      return;
+    }
+    if (explosionMap.map[tile.coord.x][tile.coord.y] == turn) {
+      return;
+    }
+
+    tiles.add(tile);
+    for (Tile adj : tile.adjTiles) {
+      addIfAvailable(turn+1, maxTurn, tiles, adj);
+    }
+  }
+
+  void calculateWeigths(List<Tile> tiles, AI.Strategy strategy) {
+    for (Tile tile : tiles) {
+      switch(tile.type) {
+        case ITEM_AMOUNT:
+          tile.weight += strategy == AI.Strategy.BOX_HUNTER ? 3 : 1;
+          break;
+        case ITEM_RANGE:
+          tile.weight += strategy == AI.Strategy.BOX_HUNTER ? 4 : 1;
+          break;
+      }
+      if (strategy == AI.Strategy.BOX_HUNTER) {
+        tile.weight += bombPlaceWeights(tile.coord);
+        tile.weight += tile.adjTiles.size();
+        tile.weight -= tile.coord.distance(hero.coord);
+      } else if (strategy == AI.Strategy.AGGRO_PALADIN) {
+        rivals.values().stream().filter(rival -> rival.updateRound == round).forEach(rival -> {
+          switch (rival.coord.distance(tile.coord)){
+            case 6:
+            case 5:
+              tile.weight += 20;
+            case 4:
+            case 3:
+              tile.weight += 20;
+            case 2:
+            case 1:
+              tile.weight += 20;
+            case 0:
+              tile.weight += 20;
+
           }
-        }
-      }
-      //room for algorithm improvement
-      for (Tile explode : getAllExplodingTiles(move.pos.x, move.pos.y, hero.param2)) {
-        switch (explode.boxType) {
-          case Constants.ITEM_EMPTY:
-            magnetism += 3;
-            break;
-          case Constants.ITEM_AMOUNT:
-            magnetism += 4;
-            break;
-          case Constants.ITEM_POWER:
-            magnetism += 5;
-            break;
-        }
-      }
+        });
+      } else if (strategy == AI.Strategy.RUNNER) {
+        rivals.values().stream().filter(rival -> rival.updateRound == round && rival.coord.distance(tile.coord) <= 6).forEach(rival -> {
+          switch (rival.coord.distance(tile.coord)){
+            case 6:
+            case 5:
+              tile.weight -= 20;
+            case 4:
+            case 3:
+              tile.weight -= 20;
+            case 2:
+            case 1:
+              tile.weight -= 20;
+            case 0:
+              tile.weight -= 20;
 
-      if (getRivalTiles(3).contains(move)) {
-        if (remainingBox > 0) {
-          magnetism -= 10;
-        } else {
-          //todo run if my boxcount > rivals count
-          //box end -> let's hunt
-          magnetism += 1000;
-        }
-      }
-
-      move.magnetism = magnetism;
-    }
-  }
-
-  private void checkTileAndAdd(int x, int y) {
-    if (x < 0 || y < 0 || x >= Constants.WIDTH || y >= Constants.HEIGHT) {
-      return;
-    }
-    Tile tile = tiles[x][y];
-    if (possibleMoves.contains(tiles[x][y]) || (!tile.moveable && !tile.pos.equals(hero.position))) {
-      return;
-    }
-    possibleMoves.add(tile);
-    checkTileAndAdd(x - 1, y);
-    checkTileAndAdd(x + 1, y);
-    checkTileAndAdd(x, y - 1);
-    checkTileAndAdd(x, y + 1);
-  }
-
-  //add chain reaction handle
-  private void addBomb(Entity bomb) {
-    tiles[bomb.position.x][bomb.position.y].moveable = false;
-    bombs.add(bomb);
-    for (Tile tile : getAllExplodingTiles(bomb.position.x, bomb.position.y, bomb.param2)) {
-      tile.dangerous = true;
-      tile.stopExplosion = true;
-      if (bomb.param1 <= 2){
-        tile.moveable = false;
+          }
+        });
       }
     }
   }
 
-  private void addItem(Entity item) {
-    items.add(item);
-    tiles[item.position.x][item.position.y].stopExplosion = true;
+  int bombPlaceWeights(Coord coord) {
+    int weight = 0;
+    for (Coord explodeCoord : explosionMap.explodingMap(coord, hero.range)) {
+      switch (map[explodeCoord.x][explodeCoord.y].type) {
+        case BOX:
+          weight += 2;
+          break;
+        case BOX_AMOUNT:
+          weight += 3;
+          break;
+        case BOX_RANGE:
+          weight += 3;
+          break;
+      }
+    }
+    return weight;
   }
 
-  private Set<Tile> getAllExplodingTiles(int x, int y, int power) {
-    Set<Tile> result = new HashSet<>();
-    result.add(tiles[x][y]);
-    for (int i = x + 1; i < Math.min(x + power, Constants.WIDTH); i++) {//TO RIGHT
-      Tile tile = tiles[i][y];
-      if (!tile.destructible) {
-        break;
-      }
-      result.add(tile);
-      if (tile.stopExplosion) {
-        break;
-      }
-    }
-    for (int i = x - 1; i > Math.max(x - power, -1); i--) {//TO LEFT
-      Tile tile = tiles[i][y];
-      if (!tile.destructible) {
-        break;
-      }
-      result.add(tile);
-      if (tile.stopExplosion) {
-        break;
-      }
-    }
-    for (int i = y + 1; i < Math.min(y + power, Constants.HEIGHT); i++) {//TO Bottom
-      Tile tile = tiles[x][i];
-      if (!tile.destructible) {
-        break;
-      }
-      result.add(tile);
-      if (tile.stopExplosion) {
-        break;
-      }
-    }
-    for (int i = y - 1; i > Math.max(y - power, -1); i--) {//TO UP
-      Tile tile = tiles[x][i];
-      if (!tile.destructible) {
-        break;
-      }
-      result.add(tile);
-      if (tile.stopExplosion) {
-        break;
-      }
-    }
-    if (x == 6 && y == 2) {
-      System.err.println("for " + x + "|" + y + " with power " + power + " exploding count " + result.size() + "\nTiles:" + Arrays.toString(result.toArray()));
-    }
-    return result;
+  boolean canPlaceBomb(Coord placeCoord, List<Tile> tiles) {
+    List<Coord> predicter = new ArrayList<>();
+    tiles.forEach(tile -> predicter.add(tile.coord));
+    predicter.removeAll(explosionMap.explodingMap(placeCoord, hero.range));
+    return !predicter.isEmpty();
   }
 
-  private Set<Tile> getRivalTiles(int radius) {
-    Set<Tile> result = new HashSet<>();
-    int x = rival.position.x;
-    int y = rival.position.y;
-    int startX = Math.max(0, x - radius);
-    int endX = Math.min(Constants.WIDTH, x + radius);
-    int startY = Math.max(0, y - radius);
-    int endY = Math.min(Constants.HEIGHT, y + radius);
-
-    for (int x1 = startX; x1 < endX; x1++) {
-      for (int y1 = startY; y1 < endY; y1++) {
-        result.add(tiles[x1][y1]);
+  Bomber getLeader() {
+    Bomber leader = hero;
+    for (Bomber rival : rivals.values()) {
+      if (rival.updateRound < round) {
+        continue;
+      }
+      if (rival.points > leader.points) {
+        leader = rival;
       }
     }
-
-    return result;
+    return leader;
   }
 
-  //add check possible moves after bomb
-  public boolean canBombNow() {
-    List<Tile> predictSave = new ArrayList<>(possibleMoves);
-    predictSave.removeAll(getAllExplodingTiles(hero.position.x, hero.position.y, hero.param2));
-    List<Tile> bestOf = new ArrayList<>(possibleMoves.subList(0, Math.min(possibleMoves.size(), hero.param1)));
-//    System.err.println(hero.param1 + "\n" + Arrays.toString(predictSave.toArray()) + "\n" + Arrays.toString(possibleMoves.toArray()));
-    return hero.param1 > 0 && !predictSave.isEmpty() && bestOf.contains(tiles[hero.position.x][hero.position.y]);
-  }
-
-  public Point findBestPosition() {
-    System.err.println("BEST POS:" + possibleMoves.get(0));
-    if (possibleMoves.size() > 1) {
-      System.err.println("SECOND BEST:" + possibleMoves.get(1));
-    } else {
-      System.err.println("NO SECOND BEST");
-    }
-    if (possibleMoves.get(0).pos.equals(hero.position) && possibleMoves.size() > 1) {
-      return possibleMoves.get(1).pos;
-    }
-    return possibleMoves.get(0).pos;
-  }
-
-  public Point findBestPositionWithBomb() {
-    System.err.println("WITH BOMB");
-    possibleMoves.removeAll(getAllExplodingTiles(hero.position.x, hero.position.y, hero.param2));
-    return findBestPosition();
-  }
 }
 

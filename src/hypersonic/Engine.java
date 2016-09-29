@@ -5,28 +5,34 @@ import java.util.Scanner;
 public class Engine {
 
   public void start() {
-    Scanner in = new Scanner(System.in);
-    Constants.WIDTH = in.nextInt();
-    Constants.HEIGHT = in.nextInt();
-    Constants.TEAM_ID = in.nextInt();
-    in.nextLine();
+    Scanner scanner = new Scanner(System.in);
+    World world = new World();
+    world.getWorldParameters(scanner);
+    AI ai = new AI(world);
+    long ns = System.nanoTime();
 
-    TileMap tileMap = new TileMap();
-
-    // game loop
     while (true) {
-      tileMap.updateMap(in);
-      in.nextLine();
+      System.err.println("Round " + world.round + " calc in " + (System.nanoTime() - ns) / 1000000 + " ms");
+      ns = System.nanoTime();
 
-      if (tileMap.canBombNow()) {
-        command(true, tileMap.findBestPositionWithBomb());
-      } else {
-        command(false, tileMap.findBestPosition());
+      world.updateTiles(scanner);
+      world.updateEntities(scanner);
+      world.updateExplosionMap();
+      world.updateTileLinks();
+
+      if (world.round >= 120 || world.remainingBoxes < 5) {
+        System.err.println("CHANGE STRATEGY");
+
+        if (world.getLeader().equals(world.hero)) {
+          ai.scanRange = 8;
+          ai.strategy = AI.Strategy.RUNNER;
+        } else {
+          ai.scanRange = 16;
+          ai.strategy = AI.Strategy.AGGRO_PALADIN;
+        }
       }
+      ai.makeDecision();
+      world.round++;
     }
-  }
-
-  private void command(boolean bomb, Point position) {
-    System.out.println(String.format("%s %s %s", bomb ? "BOMB" : "MOVE", position.x, position.y));
   }
 }

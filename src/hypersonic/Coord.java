@@ -2,21 +2,26 @@ package hypersonic;
 
 import java.util.Scanner;
 
-public class Point {
+public class Coord {
   int x;
   int y;
 
-  Point(int x, int y) {
+  Coord(int x, int y) {
+    update(x, y);
+  }
+
+  void update(int x, int y) {
     this.x = x;
     this.y = y;
   }
 
-  Point(Scanner scanner) {
-    this(scanner.nextInt(), scanner.nextInt());
+  void update(Coord other) {
+    this.x = other.x;
+    this.y = other.y;
   }
 
-  public int distanceTo(Point other) {
-    return Math.abs(other.x - x) + Math.abs(other.y - y);
+  int distance(Coord other) {
+    return Math.abs(x - other.x) + Math.abs(y - other.y);
   }
 
   @Override
@@ -24,10 +29,10 @@ public class Point {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
 
-    Point point = (Point) o;
+    Coord that = (Coord) o;
 
-    if (x != point.x) return false;
-    return y == point.y;
+    if (x != that.x) return false;
+    return y == that.y;
 
   }
 
@@ -40,6 +45,6 @@ public class Point {
 
   @Override
   public String toString() {
-    return "Point("+x+"|"+y+")";
+    return x +"|" + y;
   }
 }
