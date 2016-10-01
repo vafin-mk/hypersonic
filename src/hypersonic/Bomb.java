@@ -1,34 +1,26 @@
 package hypersonic;
 
-public class Bomb {
+class Bomb {
 
-  static final int ENTITY_TYPE = 1;
+  static final int EXPLODE_NEXT_TURN = 1;
+  static final int NO_EXPLODE = -10000;
 
-  Coord coord = new Coord(0, 0);
-  int countdown;
-  int range;
+  int col;
+  int row;
   int owner;
+  int time;//to explode
+  int range;
 
-  Bomb(Coord coord, int owner, int countdown, int range) {
-    this.coord = coord;
+  Bomb(int col, int row, int owner, int time, int range) {
+    this.col = col;
+    this.row = row;
     this.owner = owner;
-    this.countdown = countdown;
+    this.time = time;
     this.range = range;
   }
 
   @Override
-  public boolean equals(Object o) {
-    if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
-
-    Bomb bomb = (Bomb) o;
-
-    return coord != null ? coord.equals(bomb.coord) : bomb.coord == null;
-
-  }
-
-  @Override
-  public int hashCode() {
-    return coord != null ? coord.hashCode() : 0;
+  public String toString() {
+    return String.format("(%s/%s[%s] - (%s, %s))", col, row, owner, time, range);
   }
 }

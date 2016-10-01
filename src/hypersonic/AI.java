@@ -3,184 +3,147 @@ package hypersonic;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class AI {
+  
+  Grid grid;
 
-  enum Strategy {
-    BOX_HUNTER, //normal
-    AGGRO_PALADIN, //aggro paladin
-    RUNNER //escaper
+  AI(Grid grid) {
+    this.grid = grid;
   }
 
-  World world;
+  boolean decision() {
+    Tile item = closestItemTile(4);
+    Tile bomb = bestBombTile();
+    Tile safe = closestSafeTile();
+    System.err.println(String.format("ITEM:%s\nBOMB:%s\nSAFE=%s", item, bomb, safe));
+    Hero hero = grid.myHero();
 
-  int scanRange = 6;
-  Strategy strategy = Strategy.BOX_HUNTER;
-
-  AI(World world) {
-    this.world = world;
-  }
-
-  void makeDecision() {
-    List<Tile> available = new ArrayList<>();
-    world.buildAvailableTiles(scanRange, available);
-    world.calculateWeigths(available, strategy);
-    if (available.isEmpty()) {
-      System.err.println("STAY WHERE YOU ARE");
-      stay();
-      return;
+    if (item == null && bomb == null && safe == null) {
+      return stay("whoops");
     }
-    available.sort((o1, o2) -> {
-      int weightDelta = o2.weight - o1.weight;
-      if (weightDelta != 0) {
-        return weightDelta;
+    if (item != null) {
+      boolean canGo = true;
+      for (Tile tile : grid.tilesIn(grid.tiles[hero.col][hero.row], 2)) {
+        if (grid.boomMap[tile.col][tile.row] != Bomb.NO_EXPLODE) {
+          canGo = false;
+          break;
+        }
       }
-      int distDelta = o1.coord.distance(world.hero.coord) - o2.coord.distance(world.hero.coord);
-      if (distDelta != 0) {
-        return distDelta;
+      if (canGo) {
+        return move(item, String.format("item - %s/%s", item.col, item.row));
       }
-      if (o1.coord.x != o2.coord.x) {
-        return o1.coord.x - o2.coord.x;
-      } else {
-        return o1.coord.y - o2.coord.y;
+    }
+
+    if (bomb != null) {
+      if (hero.col != bomb.col || hero.row != bomb.row) {
+        return move(bomb, String.format("bomb - %s/%s", bomb.col, bomb.row));
       }
+      if (hero.bombs > 0) {
+        return bomb(bomb, String.format("bomb - %s/%s", bomb.col, bomb.row));
+      }
+    }
+
+    if (safe != null) {
+      return move(safe, String.format("safe - %s/%s", safe.col, safe.row));
+    }
+
+    return stay("" + (200 - grid.round));
+  }
+
+  Tile closestItemTile(int maxScanRadius) {
+    List<Tile> items = new ArrayList<>(grid.moves)
+        .stream()
+        .filter(tile -> tile.type == Tile.Type.ITEM
+            && tile.range < maxScanRadius)
+        .collect(Collectors.toList());
+    items.sort((tile1,tile2) -> tile1.range - tile2.range);
+    if (items.isEmpty()) {
+      return null;
+    }
+//    grid.debugList(items, 5, "ITEMS");
+    return items.get(0);
+  }
+
+  Tile bestBombTile() {
+    List<Tile> tiles = new ArrayList<>(grid.moves)
+        .stream()
+        .filter(tile -> grid.canBomb(tile))
+        .collect(Collectors.toList());
+    tiles.sort((tile1, tile2) -> {
+      return (2 * grid.findExplodedBoxesCount(tile2) - tile2.range) - (2 * grid.findExplodedBoxesCount(tile1) - tile1.range);
     });
-    System.err.println("AVAILABLE:" + Arrays.toString(available.toArray()));
-    switch (strategy) {
-      case BOX_HUNTER:
-        if (boxDecision(available)) {
-          return;
-        }
-        break;
-      case AGGRO_PALADIN:
-        if (aggroDecision(available)) {
-          return;
-        }
-        break;
-      case RUNNER:
-        if (runnerDecision(available)) {
-          return;
-        }
-        break;
+    if (tiles.isEmpty()) {
+      return null;
     }
-    System.err.println("HOUSTON WE HAVE A PROBLEM; STAY WHERE YOU ARE");
-    stay();
+//    grid.debugList(tiles, 5, "BOMB TILES");
+    return tiles.get(0);
   }
 
-  boolean boxDecision(List<Tile> available) {
-    for (Tile tile : available) {
-      if (world.explosionMap.map[tile.coord.x][tile.coord.y] != ExplosionMap.NO_EXPLODE) {
-        continue;
+  Tile closestSafeTile() {
+    List<Tile> safe = new ArrayList<>(grid.moves)
+        .stream()
+        .filter(move -> !grid.haveExplosionDanger(move))
+        .collect(Collectors.toList());
+
+    safe.sort((move1, move2) -> {
+      int move1Boom = grid.boomMap[move1.col][move1.row];
+      int move2Boom = grid.boomMap[move2.col][move2.row];
+      if (move1Boom != move2Boom) {
+        return move2Boom - move1Boom;
       }
-      if (tile.type == Tile.Type.ITEM_RANGE || tile.type == Tile.Type.ITEM_AMOUNT) {
-        System.err.println("GOING AFTER ITEM");
-        move(tile.coord);
-        return true;
-      }
-      if (world.canPlaceBomb(tile.coord, available)) {
-        if (world.hero.bombs > 0) {
-          if (tile.coord.equals(world.hero.coord)) {
-            System.err.println("BOMBING NOW");
-            bomb(tile.coord);//todo move to another poi immediately
-            return true;
-          } else {
-            System.err.println("GOING TO PLACE BOMB AT " + tile.coord);
-            move(tile.coord);
-            return true;
-          }
-        }
-      }
+      return move1.range - move2.range;
+    });
+    if (safe.isEmpty()) {
+      return null;
     }
-    System.err.println("LOOKING FOR SAFE PLACE");
-    for (Tile tile : available) {
-      if (world.explosionMap.map[tile.coord.x][tile.coord.y] == ExplosionMap.NO_EXPLODE) {
-        System.err.println("GOING TO SAFE PLACE:" + tile.coord);
-        move(tile.coord);
-        return true;
-      }
-    }
-    return false;
+//    grid.debugList(safe, 5, "SAFE TILES");
+    return safe.get(0);
   }
 
-  boolean aggroDecision(List<Tile> available) {
-    for (Tile tile : available) {
-      if (world.explosionMap.map[tile.coord.x][tile.coord.y] != ExplosionMap.NO_EXPLODE || !haveEnemyInRange(tile.coord, 6)) {
-        continue;
-      }
-      if (world.canPlaceBomb(tile.coord, available)) {
-        if (world.hero.bombs > 0) {
-          if (tile.coord.equals(world.hero.coord) || world.hero.bombs > 1 && !haveBombInRange(tile.coord, 2)) {
-            System.err.println("BOMBING NOW");
-            bomb(tile.coord);//todo move to another poi immediately
-            return true;
-          } else {
-            System.err.println("GOING TO PLACE BOMB AT " + tile.coord);
-            move(tile.coord);
-            return true;
-          }
-        }
-      }
-    }
-    return false;
+  //COMMANDS
+
+  boolean stay(String message) {
+    Hero my = grid.myHero();
+    return move(my.col, my.row, message);
   }
 
-  boolean runnerDecision(List<Tile> available) {
-    Tile safest = null;
-    int maxDist = 0;
-    for (Tile tile : available) {
-      if (world.explosionMap.map[tile.coord.x][tile.coord.y] == ExplosionMap.NO_EXPLODE) {
-        int distToHero = tile.coord.distance(world.hero.coord);
-        if (distToHero > maxDist) {
-          maxDist = distToHero;
-          safest = tile;
-        }
-      }
-    }
-
-    if (safest != null) {
-//      if (world.canPlaceBomb(world.hero.coord, available) && world.hero.bombs > 0 && haveEnemyInRange(world.hero.coord, 6)) {
-//        bomb(safest.coord);
-//        return true;
-//      } else {
-        System.err.println("GOING TO SAFE PLACE:" + safest.coord);
-        move(safest.coord);
-//        return true;
-//      }
-    }
-    return false;
+  boolean stay() {
+    return stay("");
   }
 
-  boolean haveEnemyInRange(Coord lookCoord, int radius) {
-    boolean haveEnemyInRange = false;
-    for (Bomber rival : world.rivals.values()) {
-      if (rival.updateRound == world.round && rival.coord.distance(lookCoord) < radius) {
-        haveEnemyInRange = true;
-        break;
-      }
-    }
-    return haveEnemyInRange;
+  boolean move(int col, int row, String message) {
+    System.out.println(String.format("MOVE %s %s %s", col, row, message));
+    return true;
   }
 
-  boolean haveBombInRange(Coord lookCoord, int radius) {
-    boolean haveBombInRange = false;
-    for (Bomb bomb : world.bombs) {
-      if (bomb.coord.distance(lookCoord) < radius) {
-        haveBombInRange = true;
-        break;
-      }
-    }
-    return haveBombInRange;
+  boolean move(int col, int row) {
+    return move(col, row, "");
   }
 
-  private void stay() {
-    move(world.hero.coord);
+  boolean move(Tile target, String msg) {
+    return move(target.col, target.row, msg);
   }
 
-  private void move(Coord coord) {
-    System.out.println("MOVE " + coord.x + " " + coord.y);
+  boolean move(Tile tile) {
+    return move(tile, tile.toString());
   }
 
-  private void bomb(Coord coord) {
-    System.out.println("BOMB " + coord.x + " " + coord.y);
+  boolean bomb(int col, int row, String message) {
+    System.out.println(String.format("BOMB %s %s %s", col, row, message));
+    return true;
+  }
+
+  boolean bomb(int col, int row) {
+    return bomb(col, row, "");
+  }
+
+  boolean bomb(Tile tile, String msg) {
+    return bomb(tile.col, tile.row, msg);
+  }
+
+  boolean bomb(Tile tile) {
+    return bomb(tile, tile.toString());
   }
 }

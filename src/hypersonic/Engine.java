@@ -6,33 +6,34 @@ public class Engine {
 
   public void start() {
     Scanner scanner = new Scanner(System.in);
-    World world = new World();
-    world.getWorldParameters(scanner);
-    AI ai = new AI(world);
-    long ns = System.nanoTime();
+    int width = scanner.nextInt();
+    int height = scanner.nextInt();
+    int myId = scanner.nextInt();
+    Grid grid = new Grid(width, height, myId);
+    AI ai = new AI(grid);
+
+    long time = System.nanoTime();
+    int round = 0;
 
     while (true) {
-      System.err.println("Round " + world.round + " calc in " + (System.nanoTime() - ns) / 1000000 + " ms");
-      ns = System.nanoTime();
+      grid.updateMap(scanner);
+      grid.updateEntities(scanner);
+      grid.updateExplosionMap();
+      grid.calculateAvailableTiles();
 
-      world.updateTiles(scanner);
-      world.updateEntities(scanner);
-      world.updateExplosionMap();
-      world.updateTileLinks();
+//      grid.debugMap();
+//      grid.debugEntities();
+//      grid.debugExplosions();
+//      grid.debugPoints();
+      grid.debugList(grid.moves, 5, "MOVES");
 
-      if (world.round >= 120 || world.remainingBoxes < 5) {
-        System.err.println("CHANGE STRATEGY");
+      ai.decision();
 
-        if (world.getLeader().equals(world.hero)) {
-          ai.scanRange = 8;
-          ai.strategy = AI.Strategy.RUNNER;
-        } else {
-          ai.scanRange = 16;
-          ai.strategy = AI.Strategy.AGGRO_PALADIN;
-        }
-      }
-      ai.makeDecision();
-      world.round++;
+      System.err.println(String.format("=================%s ROUND COMPLETE====================", round));
+      System.err.println(round + " round calc time in " + (System.nanoTime() - time) / 1000000 + " ms");
+      time = System.nanoTime();
+      round++;
+      grid.round = round;
     }
   }
 }
